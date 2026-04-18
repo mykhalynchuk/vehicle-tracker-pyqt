@@ -25,17 +25,20 @@ class VideoThread(QThread):
     def run(self):
         video = cv2.VideoCapture(self.videoPath)
 
+        # Exit early if video is not available
         if not video.isOpened():
             return
 
         totalFrames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
         self.durationSignal.emit(totalFrames)
 
+        # history=500 and varThreshold=80 provide a stable background model, ignoring minor lighting changes
         subtractorBackground =cv2.createBackgroundSubtractorMOG2(
             history=500,
             varThreshold=80,
             detectShadows=True)
 
+        # Define separate kernels: a small one to remove pixel noise (open), and a larger one to bridge gaps in car shapes (close)
         kernelOpen = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         kernelClose = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 7))
 
@@ -43,21 +46,22 @@ class VideoThread(QThread):
         self.newPosition = -1
 
         while self.running:
+            # Apply seek here to keep all video operations inside the same thread
             if self.newPosition != -1:
                 video.set(cv2.CAP_PROP_POS_FRAMES, self.newPosition)
                 self.newPosition = -1
 
+            # Do not stop thread on pause to keep video position and processing state
             if self.pauseThread:
                 self.msleep(50)
-
                 prevTime = time.time()
                 continue
 
             ret, frame = video.read()
-
             if not ret:
                 break
 
+            # Measure real processing FPS instead of video FPS, because processing speed can change
             currentTime = time.time()
             elapsedTime = currentTime - prevTime
             if elapsedTime > 0:
@@ -70,29 +74,41 @@ class VideoThread(QThread):
 
             grayFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
+            # Convert to BGR to draw colored overlays
             frameForDisplay = cv2.cvtColor(grayFrame, cv2.COLOR_GRAY2BGR)
 
             height, width = frame.shape[:2]
+
+            # Use only lower part of frame, because cars are expected there; reduces noise from background
             maskRoi = np.zeros((height, width), dtype=np.uint8)
             cv2.rectangle(maskRoi, (0, int(height * 0.4)), (width, height), 255, -1)
 
             roiFrame = cv2.bitwise_and(grayFrame, grayFrame, mask=maskRoi)
+
+            # Reduce noise before detection
             blurFrame = cv2.GaussianBlur(roiFrame, (5, 5), 0)
 
+            # Slow learning rate prevents fast background changes and reduces false detections
             fgMask = subtractorBackground.apply(blurFrame, learningRate=0.01)
+
+            # Remove weak noise and shadows
             _, fgMask = cv2.threshold(fgMask, 240, 255, cv2.THRESH_BINARY)
 
+            # Clean mask and connect object parts
             fgMask = cv2.morphologyEx(fgMask, cv2.MORPH_OPEN, kernelOpen, iterations=1)
             fgMask = cv2.morphologyEx(fgMask, cv2.MORPH_CLOSE, kernelClose, iterations=3)
 
             contours, _ = cv2.findContours(fgMask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+            # Filter contours by size and shape to remove noise and keep possible vehicles
             for contour in contours:
                 area = cv2.contourArea(contour)
+
                 if area > 300:
                     x, y, w, h = cv2.boundingRect(contour)
 
                     ratio = w/h
+
                     if 0.4 <  ratio < 4.0:
                         cv2.rectangle(frameForDisplay, (x, y), (x + w, y + h), (0, 255, 0), 2)
                         cv2.putText(frameForDisplay, "Car", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
@@ -100,21 +116,24 @@ class VideoThread(QThread):
             if ret:
                 self.resultSignal.emit(frameForDisplay)
 
+            # Small delay to reduce CPU load and keep UI responsive
             self.msleep(30)
-
 
         video.release()
 
     def pause(self):
+        # Toggle pause state
         self.pauseThread = not self.pauseThread
 
 
     def stop(self):
+        # Stop thread safely
         self.running = False
         self.quit()
         self.wait()
 
     def setFrame(self, frameNumber):
+        # Store position to update it in main loop
         self.newPosition = frameNumber
 
 class App(QWidget):
@@ -130,13 +149,19 @@ class App(QWidget):
 
         self.videoLabel = QLabel()
         self.videoLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Set fixed minimum size to keep stable video display area
         self.videoLabel.setMinimumSize(800, 600)
 
         self.fpsLabel = QLabel("FPS: 0")
+
+        # Highlight FPS for better visibility during processing
         self.fpsLabel.setStyleSheet("color: #00FF00; font-size: 18px; font-weight: bold;")
         self.fpsLabel.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         self.slider = QSlider(Qt.Orientation.Horizontal)
+
+        # Trigger seek only after user finishes dragging to avoid too many updates
         self.slider.sliderReleased.connect(self.seekVideo)
         self.slider.setRange(0,0)
 
@@ -167,9 +192,11 @@ class App(QWidget):
         self.setLayout(self.mainLayout)
 
     def updateDuration(self, duration):
+        # Trigger seek only after user finishes dragging to avoid too many updates
         self.slider.setRange(0, duration)
 
     def updatePosition(self, position):
+        # Set slider range based on total video frames
         if not self.slider.isSliderDown():
             self.slider.setValue(position)
 
@@ -180,6 +207,7 @@ class App(QWidget):
             self.videoPath = videoPath
             self.videoLabel.setText("Video loaded. Press Play/Pause.")
 
+            # Stop previous thread to prevent multiple video streams
             if self.thread is not None:
                 self.thread.stop()
 
@@ -190,6 +218,7 @@ class App(QWidget):
 
         if self.thread is None or not self.thread.isRunning():
 
+            # Stop previous thread to prevent multiple video streams
             self.thread = VideoThread(self.videoPath)
 
             self.thread.resultSignal.connect(self.showVideo)
@@ -198,9 +227,12 @@ class App(QWidget):
             self.thread.fpsSignal.connect(self.updateFps)
 
             self.thread.start()
+
+            # Clear previous frame before starting playback
             self.videoLabel.clear()
 
         else:
+            # Clear previous frame before starting playback
             self.thread.pause()
 
     def stop(self):
@@ -208,12 +240,10 @@ class App(QWidget):
             self.thread.stop()
             self.thread.wait()
 
+            # Reset UI state after stopping video
             self.slider.setValue(0)
             self.fpsLabel.setText("FPS:0")
-
             self.videoLabel.clear()
-
-
 
     def showVideo(self, frame):
         rgbImage = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -221,6 +251,7 @@ class App(QWidget):
         h, w, ch = rgbImage.shape
         bytesPerLine = ch * w
 
+        # Copy is required because Qt does not safely use numpy memory
         qtImage = QImage(
             rgbImage.data,
             w,
@@ -241,6 +272,8 @@ class App(QWidget):
     def seekVideo(self):
         if self.thread and self.thread.isRunning():
             position = self.slider.value()
+
+            # Send new frame position to thread to keep synchronization
             self.thread.setFrame(position)
 
 app = QApplication(sys.argv)
