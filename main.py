@@ -8,8 +8,6 @@ from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QApplication, QHBoxLayout, QSlider
-from PyQt6.QtWidgets.QWidget import height
-
 
 class VideoThread(QThread):
     resultSignal = pyqtSignal(object)
@@ -96,51 +94,37 @@ class App(QWidget):
         self.videoPath = None
 
         self.mainLayout = QHBoxLayout()
+        self.leftLayout = QVBoxLayout()
+        self.rightLayout = QVBoxLayout()
 
-        self.videoWidget = QVideoWidget()
-
-        self.videoPlayer = QMediaPlayer()
-        self.videoPlayer.setVideoOutput(self.videoWidget)
-
-        self.videoPlayer.durationChanged.connect(self.updateDuration)
-        self.videoPlayer.positionChanged.connect(self.updatePosition)
-
-        self.slider = QSlider()
-        self.slider.sliderMoved.connect(self.setPosition)
-
-        # self.videoPlayer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.videoWidget.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
-        self.videoWidget.setMinimumSize(800, 600)
+        self.videoLabel = QLabel()
+        self.videoLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.videoLabel.setMinimumSize(800, 600)
 
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(0,0)
 
-
-        self.rightLayout = QVBoxLayout()
-
         self.btnLoadVideo = QPushButton("Load Video")
         self.btnLoadVideo.clicked.connect(self.loadVideo)
 
-        self.btnPlayResume = QPushButton("Play/Resume")
-        self.btnPlayResume.clicked.connect(self.playResume)
-
-        self.btnPause = QPushButton("Pause")
-        self.btnPause.clicked.connect(self.pause)
+        self.btnPlayPause = QPushButton("Play/Pause")
+        self.btnPlayPause.clicked.connect(self.playPause)
 
         self.btnStop = QPushButton("Stop")
         self.btnStop.clicked.connect(self.stop)
 
+        self.leftLayout.addWidget(self.videoLabel)
+        self.leftLayout.addWidget(self.slider)
+
         self.rightLayout.addStretch()
 
         self.rightLayout.addWidget(self.btnLoadVideo)
-        self.rightLayout.addWidget(self.btnPlayResume)
-        self.rightLayout.addWidget(self.btnPause)
+        self.rightLayout.addWidget(self.btnPlayPause)
         self.rightLayout.addWidget(self.btnStop)
 
         self.rightLayout.addStretch()
 
-        self.mainLayout.addWidget(self.videoWidget)
-        self.mainLayout.addWidget(self.slider)
+        self.mainLayout.addLayout(self.leftLayout)
         self.mainLayout.addLayout(self.rightLayout)
 
         self.setLayout(self.mainLayout)
@@ -162,21 +146,11 @@ class App(QWidget):
             video = cv2.imread(videoPath)
             self.showVideo(video)
 
-    def playResume(self):
+    def playPause(self):
         print("Play/Resume button clicked!(Video logic not implemented yet)")
-
-    def pause(self):
-        print("Pause button clicked!(Video logic not implemented yet)")
 
     def stop(self):
         print("Stop button clicked!(Video logic not implemented yet)")
-
-
-
-
-
-
-
 
 
 app = QApplication(sys.argv)
